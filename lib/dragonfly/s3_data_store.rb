@@ -53,14 +53,14 @@ module Dragonfly
         s3 = Aws::S3::Resource.new(
           :access_key_id => @access_key_id,
           :secret_access_key => @secret_access_key,
-          :region => @region
+          :region => 'us-east-1'
         )
-        s3.bucket(bucket_name).object(full_path(uid)).upload_file(f.path, {:metadata => full_storage_headers(headers, content.meta)})
+        s3.bucket(bucket_name).object(full_path(uid)).upload_file(content.file.path, {:metadata => full_storage_headers(headers, content.meta)})
         #content.file do |f|
         #  storage.put_object(bucket_name, full_path(uid), f, full_storage_headers(headers, content.meta))
         #end
       end
-
+      
       uid
     end
 
