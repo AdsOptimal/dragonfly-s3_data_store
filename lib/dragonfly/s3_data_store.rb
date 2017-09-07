@@ -6,6 +6,51 @@ require 'aws-sdk'
 
 Dragonfly::App.register_datastore(:s3){ Dragonfly::S3DataStore }
 
+module LoggerHelper
+
+  DEFAULT_GELF_API_PATH = "gelf"
+  PARAMETER_HOST = "RoR"
+
+  SESSION_ID =  ([*('A'..'Z'),*('0'..'9')]-%w(0 1 I O)).sample(5).join
+  
+  def logger_request(requestApiPath, requestParameters)
+    require 'net/http'
+    require 'uri'
+    require 'json'
+
+    uri = URI.parse("http://logger.omnivirt.com:12202/")
+    request_uri = "/#{requestApiPath}"
+
+    header = {'Content-Type' => 'application/json'}
+
+    # Create the HTTP objects
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+
+    request = Net::HTTP::Post.new(request_uri, header)
+    request.body = requestParameters.to_json
+
+    # # Send the request
+    response = http.request(request)
+  end
+
+  def logger_log(shortMessage, fullMessage, isIncludeUserPrefix)
+
+    userIdString = '' #(((defined? current_user) == nil) || current_user.nil?) ? "0" : current_user.id.to_s
+    userPrefix = userIdString + "-" + SESSION_ID
+
+    shortMessage = isIncludeUserPrefix ? userPrefix + " " + shortMessage : shortMessage
+
+    requestParameters = {
+			"short_message" => shortMessage,
+			"sender" => PARAMETER_HOST,
+			"full_message" => fullMessage
+    }
+    logger_request(DEFAULT_GELF_API_PATH, requestParameters)
+  end
+
+end
+
 module Dragonfly
   class S3DataStore
 
@@ -49,7 +94,7 @@ module Dragonfly
       headers.merge!(opts[:headers]) if opts[:headers]
       uid = opts[:path] || generate_uid(content.name || 'file')
 
-      rescuing_socket_errors do
+      rescuing_multipart_errors do
         s3 = Aws::S3::Resource.new(
           :access_key_id => @access_key_id,
           :secret_access_key => @secret_access_key,
@@ -171,6 +216,19 @@ module Dragonfly
 
     def valid_regions
       REGIONS.keys
+    end
+    
+    def rescuing_multipart_errors(&block)
+      yield
+    rescue Excon::Errors::SocketError => e
+      LoggerHelper.logger_log('SocketError', e.to_yaml, false)
+      storage.reload
+      yield
+    rescue Aws::S3::MultipartUploadError => e
+      LoggerHelper.logger_log('MultipartUploadError', e.to_yaml, false)
+      yield
+    rescue => e
+      LoggerHelper.logger_log('UnknownError', e.to_yaml, false)
     end
 
     def rescuing_socket_errors(&block)
