@@ -55,6 +55,7 @@ module Dragonfly
           :secret_access_key => @secret_access_key,
           :region => 'us-east-1'
         )
+        raise Aws::S3::MultipartUploadError
         s3.bucket(bucket_name).object(full_path(uid)).upload_file(content.file.path, {:metadata => full_storage_headers(headers, content.meta)})
         #content.file do |f|
         #  storage.put_object(bucket_name, full_path(uid), f, full_storage_headers(headers, content.meta))
