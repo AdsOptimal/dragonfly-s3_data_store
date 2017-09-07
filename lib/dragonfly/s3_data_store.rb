@@ -9,7 +9,7 @@ Dragonfly::App.register_datastore(:s3){ Dragonfly::S3DataStore }
 module LoggerHelper
 
   DEFAULT_GELF_API_PATH = "gelf"
-  PARAMETER_HOST = "RoR"
+  PARAMETER_HOST = "Dragonfly"
 
   SESSION_ID =  ([*('A'..'Z'),*('0'..'9')]-%w(0 1 I O)).sample(5).join
   
@@ -36,7 +36,7 @@ module LoggerHelper
 
   def logger_log(shortMessage, fullMessage, isIncludeUserPrefix)
 
-    userIdString = '' #(((defined? current_user) == nil) || current_user.nil?) ? "0" : current_user.id.to_s
+    userIdString = (((defined? current_user) == nil) || current_user.nil?) ? "0" : current_user.id.to_s
     userPrefix = userIdString + "-" + SESSION_ID
 
     shortMessage = isIncludeUserPrefix ? userPrefix + " " + shortMessage : shortMessage
@@ -82,6 +82,7 @@ module Dragonfly
       @use_iam_profile = opts[:use_iam_profile]
       @root_path = opts[:root_path]
       @fog_storage_options = opts[:fog_storage_options] || {}
+      @retry_count = 0
     end
 
     attr_accessor :bucket_name, :access_key_id, :secret_access_key, :region, :storage_headers, :url_scheme, :url_host, :use_iam_profile, :root_path, :fog_storage_options
@@ -94,7 +95,7 @@ module Dragonfly
       headers.merge!(opts[:headers]) if opts[:headers]
       uid = opts[:path] || generate_uid(content.name || 'file')
 
-      rescuing_multipart_errors do
+      rescuing_all_errors do
         s3 = Aws::S3::Resource.new(
           :access_key_id => @access_key_id,
           :secret_access_key => @secret_access_key,
@@ -218,7 +219,7 @@ module Dragonfly
       REGIONS.keys
     end
     
-    def rescuing_multipart_errors(&block)
+    def rescuing_all_errors(&block)
       yield
     rescue Excon::Errors::SocketError => e
       LoggerHelper.logger_log('SocketError', e.to_yaml, false)
@@ -226,9 +227,14 @@ module Dragonfly
       yield
     rescue Aws::S3::MultipartUploadError => e
       LoggerHelper.logger_log('MultipartUploadError', e.to_yaml, false)
-      yield
+      @retry_count += 1
+      yield if @retry_count < 3
+      raise e if @retry_count >= 3
     rescue => e
       LoggerHelper.logger_log('UnknownError', e.to_yaml, false)
+      @retry_count += 1
+      yield if @retry_count < 3
+      raise e if @retry_count >= 3
     end
 
     def rescuing_socket_errors(&block)
